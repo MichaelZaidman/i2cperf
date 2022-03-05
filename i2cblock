@@ -1,0 +1,278 @@
+# SPDX-License-Identifier: MIT
+#
+# Copyright (C) 2022 Michael Zaidman <michael.zaidman@gmail.com>
+#
+# The i2cblock is a Linux utility to test the large IO chunks' capabilities
+# and benchmark performance of the I2C controllers and Linux kernel I2C bus
+# drivers.
+#
+# WARNING: the utility can be extremely dangerous if used improperly. It can
+#          confuse your I2C bus, cause data loss, or have more serious side
+#          effects. Be extremely careful using this tool.
+#
+#!/bin/bash
+
+(return 0 2>/dev/null) && sourced=1 || sourced=0
+
+if [ $sourced == 1 ]; then
+	er_exit="return"
+	ok_exit="return"
+else
+	er_exit="exit 1"
+	ok_exit="exit 0"
+fi
+
+progname=$(basename $0)
+verbose=0
+fillmode=0
+dumpmode=0
+xfersize=16
+offsize=1
+
+# Default range to preserve the FT260 configuration resided in the first half
+# of the 24c02 EEPROM mounted on the UMFT260EV1A EVB module.
+frst=0x80
+last=0xef
+stats=0
+
+fillmode_desc=(
+	"Fill block with zeros via i2ctransfer"
+	"Fill block with increment via i2ctransfer by chunks"
+	"Fill block with increment via i2cset byte by byte"
+	"Fill block with pseudo random via i2ctransfer by chunks"
+	)
+
+dumpmode_desc=(
+	"Read block via i2cdump byte by byte"
+	"Read block via i2ctransfer by chunks"
+	)
+
+offsize_desc=(
+	"One byte offset like in 24C01 - 24C16 EEPROMs"
+	"Two bytes offest, for larger than 256B EEPROMs"
+	)
+
+function usage() {
+	 cat << help
+
+	 Usage: $progname [-h] [-v] -S] [-f TYPE] [-d TYPE] [-o SIZE] [-s SIZE] [-r FIRST-LAST] BUS ADDRESS
+
+		 BUS                    I2C bus master device number
+		 ADDRESS                EEPROM device address (0x50 - 0x57)
+
+	 optional arguments:
+		 -h, --help             Show this help message and exit
+		 -v, --verbose          More verbose output
+		 -S, --stats            Statistics
+help
+	echo "                 -f, --fillmode         Write block:"
+	for ((i = 1; i <= ${#fillmode_desc[@]}; i++))
+		do echo -e "\t\t\t\t\t$i - ${fillmode_desc[$((i - 1))]}"; done
+	echo "                 -d, --dumpmode         Read block:"
+	for ((i = 1; i <= ${#dumpmode_desc[@]}; i++))
+		do echo -e "\t\t\t\t\t$i - ${dumpmode_desc[$((i - 1))]}"; done
+	echo "                 -r, --range FIRST-LAST Address range to operate"
+	echo "                 -s, --xfersize SIZE    Bytes in write chunk"
+	echo "                 -o, --offsize          Offset size:"
+	for ((i = 1; i <= ${#offsize_desc[@]}; i++))
+		do echo -e "\t\t\t\t\t$i - ${offsize_desc[$((i - 1))]}"; done
+}
+
+if [ $# -eq 0 ]; then
+	usage
+	eval "$er_exit"
+fi
+
+function get_range() {
+	[[ "$1" != *"-"* ]] && echo "wrong range delimiter" && eval "$er_exit"
+	arr=(${1//-/ })
+	frst=${arr[0]}
+	last=${arr[1]}
+}
+
+OPTS=$(getopt -o "hf:d:r:s:o:vS" \
+	--long "help,fillmode:,dumpmode:,range:,xfersize:,offsize:,verbose,stats" \
+	-n "$progname" -- "$@")
+
+if [ $? != 0 ] ; then
+	echo "Error in command line arguments." >&2
+	usage
+	eval "$er_exit"
+fi
+eval set -- "$OPTS"
+
+while true; do
+	case "$1" in
+		-h | --help ) usage; eval "$ok_exit" ;;
+		-r | --range ) get_range "$2"; shift 2 ;;
+		-f | --fillmode ) fillmode="$2"; shift 2 ;;
+		-d | --dumpmode ) dumpmode="$2"; shift 2 ;;
+		-s | --xfersize ) xfersize="$2"; shift 2 ;;
+		-o | --offsize ) offsize="$2"; shift 2 ;;
+		-v | --verbose ) verbose=1; shift 1 ;;
+		-S | --stats ) stats=1; shift 1 ;;
+		-- ) shift; break ;;
+		* ) break ;;
+	esac
+done
+
+if [ $# -ne 2 ]; then
+	usage
+	eval "$er_exit"
+fi
+bus=$1
+addr=$2
+
+function core_stats() {
+	chunks=$(echo "$total_data / $xfersize" | bc)
+	cat <<- core_st
+	Data chunks     $chunks
+	Chunk bytes     $xfersize
+	Payload bytes   $total_data
+	IOs total sec   $total_time
+	Chunk avg sec   $(echo "scale=6; $total_time / $chunks" | bc)
+core_st
+}
+
+function dump_stats() {
+	printf '%.0s-' {1..60}; echo
+	cat <<- dump_st
+	Dump mode       ${dumpmode_desc[$((dumpmode - 1))]}
+dump_st
+	core_stats
+}
+
+function fill_stats() {
+	cat <<- fill_st
+	Fill mode       ${fillmode_desc[$((fillmode - 1))]}
+fill_st
+	core_stats
+}
+
+[ $verbose -eq 1 ] && echo range: first=$frst last=$last
+
+function run() {
+	[ $verbose -eq 1 ] && echo "sudo $@"
+	if [ $stats -eq 1 ]; then
+		start_time=$(date +%s.%N)
+		sudo "$@"
+		stop_time=$(date +%s.%N)
+		diff_time=$(echo "$stop_time - $start_time" | bc)
+		diff_time=${diff_time%???}
+		total_time=$(echo "$total_time + $diff_time" | bc)
+	else
+		sudo "$@"
+	fi
+}
+
+function setoffset() {
+	eval $1=$( printf "0x%0*x" 4 $4 )
+	eval $2=$( printf "0x%x" "$(( xx >> 0x8 ))" )
+	eval $3=$( printf "0x%x" "$(( xx & 0xff ))" )
+}
+
+function dumpmode_1() {
+	(( last - frst > 0xff )) && echo "err: invalid range" && eval "$er_exit"
+	sudo i2cset -y -f $bus $addr $frst c
+	run i2cdump -f -y -r $frst-$last $bus $addr c
+}
+
+function dumpmode_2() {
+	step=$xfersize
+	for (( i=$frst; i<$last; i=i+$step ))
+	do
+		(( last - i < step )) && step=$(( last - i + 1 ))
+		setoffset xx hb lb $i
+		echo -ne "$xx: "
+		if [[ $offsize == "1" ]]; then
+			run i2ctransfer -y -f $bus w$offsize@$addr $lb r$step
+		else
+			run i2ctransfer -y -f $bus w$offsize@$addr $hb $lb r$step
+		fi
+	done
+}
+
+function dumpblock() {
+	total_time=0
+	[ $verbose -eq 1 ] && echo dump: ${dumpmode_desc[$((dumpmode - 1))]}
+
+	case "$dumpmode" in
+		1|2 ) dumpmode_$dumpmode ;;
+		* ) echo "err: invalid dump mode: $dumpmode"; eval "$er_exit" ;;
+	esac
+
+	total_data=$(( last - frst + 1 ))
+	[ $stats -eq 1 ] && dump_stats
+}
+
+function fillcore() {
+	for (( i=$frst; i<$last; i=i+$step ))
+	do
+		(( last - i < step )) && step=$(( last - i + 1 ))
+		setoffset xx hb lb $i
+		if [[ $offsize == "1" ]]; then
+			run i2ctransfer -f -y $bus \
+			    w$(( step + $offsize ))@$addr $lb $v$suffix
+		else
+			run i2ctransfer -f -y $bus \
+			    w$(( step + $offsize ))@$addr $hb $lb $v$suffix
+		fi
+		if [ "$v_calc" = true ]; then
+			v=$(( v + stepsd ))
+			v=$( printf "0x%x" $(( v & 0xff)) )
+		fi
+	done
+}
+
+function fillmode_1() {
+	suffix==
+	v_calc=false
+	v=0
+	fillcore
+}
+
+function fillmode_2() {
+	suffix=+
+	stepsd=$step
+	v_calc=true
+	v=0
+	fillcore
+}
+
+function fillmode_3() {
+	for (( i=$frst; i<=$last; i=i+1 ))
+	do
+		setoffset xx hb lb $i
+		if [[ $offsize == "1" ]]; then
+			run i2cset -y -f $bus $addr $lb $lb
+		else
+			run i2cset -y -f $bus $addr $hb $lb $lb i
+		fi
+	done
+}
+
+function fillmode_4() {
+	suffix=p
+	stepsd=1
+	v_calc=true
+	v=0
+	fillcore
+}
+
+function fillblock() {
+	step=$xfersize
+	total_time=0
+
+	[ $verbose -eq 1 ] && echo fillblock: ${fillmode_desc[$((fillmode - 1))]}
+
+	case "$fillmode" in
+		1|2|3|4 ) fillmode_$fillmode ;;
+		* ) echo "err: invalid fill mode: $fillmode"; eval "$er_exit" ;;
+	esac
+
+	total_data=$(( last - frst + 1 ))
+	[ $stats -eq 1 ] && fill_stats
+}
+
+[[ $fillmode > 0 ]] && fillblock
+[[ $dumpmode > 0 ]] && dumpblock
