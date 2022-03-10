@@ -33,7 +33,8 @@ offsize=1
 # of the 24c02 EEPROM mounted on the UMFT260EV1A EVB module.
 frst=0x80
 last=0xef
-stats=0
+stat=0
+width=80
 
 fillmode_desc=(
 	"Fill block with zeros via i2ctransfer"
@@ -55,25 +56,29 @@ offsize_desc=(
 function usage() {
 	 cat << help
 
-	 Usage: $progname [-h] [-v] -S] [-f TYPE] [-d TYPE] [-o SIZE] [-s SIZE] [-r FIRST-LAST] BUS ADDRESS
+	 Usage: $progname [-h] [-v] -S] [-f MODE] [-d MODE] [-o SIZE] [-s SIZE] [-r FIRST-LAST] BUS ADDRESS
 
 		 BUS                    I2C bus master device number
 		 ADDRESS                EEPROM device address (0x50 - 0x57)
 
-	 optional arguments:
 		 -h, --help             Show this help message and exit
 		 -v, --verbose          More verbose output
-		 -S, --stats            Statistics
+		 -S, --stat             Print statistics
+
+		 -d, --dumpmode MODE    Read data mode:
 help
-	echo "                 -f, --fillmode         Write block:"
-	for ((i = 1; i <= ${#fillmode_desc[@]}; i++))
-		do echo -e "\t\t\t\t\t$i - ${fillmode_desc[$((i - 1))]}"; done
-	echo "                 -d, --dumpmode         Read block:"
 	for ((i = 1; i <= ${#dumpmode_desc[@]}; i++))
 		do echo -e "\t\t\t\t\t$i - ${dumpmode_desc[$((i - 1))]}"; done
-	echo "                 -r, --range FIRST-LAST Address range to operate"
-	echo "                 -s, --xfersize SIZE    Bytes in write chunk"
-	echo "                 -o, --offsize          Offset size:"
+	printf '\n%s\n' "                 -f, --fillmode MODE    Write data mode:"
+	for ((i = 1; i <= ${#fillmode_desc[@]}; i++))
+		do echo -e "\t\t\t\t\t$i - ${fillmode_desc[$((i - 1))]}"; done
+	cat << help
+
+		 -r, --range FIRST-LAST Address range to operate
+		 -s, --xfersize SIZE    Data chunk size in bytes
+
+		 -o, --offsize SIZE     Offset (addr in chip addr space) size:
+help
 	for ((i = 1; i <= ${#offsize_desc[@]}; i++))
 		do echo -e "\t\t\t\t\t$i - ${offsize_desc[$((i - 1))]}"; done
 }
@@ -91,7 +96,7 @@ function get_range() {
 }
 
 OPTS=$(getopt -o "hf:d:r:s:o:vS" \
-	--long "help,fillmode:,dumpmode:,range:,xfersize:,offsize:,verbose,stats" \
+	--long "help,fillmode:,dumpmode:,range:,xfersize:,offsize:,verbose,stat" \
 	-n "$progname" -- "$@")
 
 if [ $? != 0 ] ; then
@@ -110,7 +115,7 @@ while true; do
 		-s | --xfersize ) xfersize="$2"; shift 2 ;;
 		-o | --offsize ) offsize="$2"; shift 2 ;;
 		-v | --verbose ) verbose=1; shift 1 ;;
-		-S | --stats ) stats=1; shift 1 ;;
+		-S | --stat ) stat=1; shift 1 ;;
 		-- ) shift; break ;;
 		* ) break ;;
 	esac
@@ -123,37 +128,55 @@ fi
 bus=$1
 addr=$2
 
-function core_stats() {
-	chunks=$(echo "$total_data / $xfersize" | bc)
-	cat <<- core_st
-	Data chunks     $chunks
-	Chunk bytes     $xfersize
-	Payload bytes   $total_data
-	IOs total sec   $total_time
-	Chunk avg sec   $(echo "scale=6; $total_time / $chunks" | bc)
-core_st
+function core_stat() {
+	xfers=$(echo "$total_data / $xfersize" | bc)
+	data_time=$(echo "scale=6; $total_time / ($total_data * 8)" | bc)
+
+	[[ $fillmode > 0 ]] && addr_byte=1 || addr_byte=2
+
+	# prot_bits = xfers * start, stop, and repeated start (for read) bits
+	prot_bits=$((xfers * (addr_byte + 1)))
+
+	# data_bits = data bytes * 8 bits + 1 ack bit
+	data_bits=$(echo "scale=0; $total_data * 9" | bc)
+
+	# addr_bits = xfers * (offsize + addr bytes) * (8 bits + 1 ack bit)
+	addr_bits=$(echo "scale=0; $xfers * ($offsize + $addr_byte) * 9" | bc)
+
+	baud_time=$(echo "scale=8; $total_time / \
+		   ($data_bits + $addr_bits + $prot_bits)" | bc)
+
+	data_rate=$(echo "scale=0; 1 / $data_time" | bc)
+	baud_rate=$(echo "scale=0; 1 / $baud_time" | bc)
+	efficiency=$(echo "scale=0; $data_rate * 100 / $baud_rate" | bc)
+
+	echo -e "\nPerformance stats:"
+	echo -e "  $1"
+	header="  %-10s %13s %14s %12s %9s %12s\n  "
+	format="  %-10d %-14d %-14d %-12d %-11d %-12d\n\n"
+
+	printf "$header" "baudrate" "datarate(bps)" "efficiency(%)" \
+		"datasize(B)" "totalIOs" "IOsize(B)"
+
+	printf '%.0s-' {1..75}; echo
+
+	printf "$format" $baud_rate $data_rate $efficiency \
+		$total_data $xfers $xfersize
 }
 
-function dump_stats() {
-	printf '%.0s-' {1..60}; echo
-	cat <<- dump_st
-	Dump mode       ${dumpmode_desc[$((dumpmode - 1))]}
-dump_st
-	core_stats
+function dump_stat() {
+	core_stat "${dumpmode_desc[$(( dumpmode - 1 ))]}"
 }
 
-function fill_stats() {
-	cat <<- fill_st
-	Fill mode       ${fillmode_desc[$((fillmode - 1))]}
-fill_st
-	core_stats
+function fill_stat() {
+	core_stat "${fillmode_desc[$(( fillmode - 1 ))]}"
 }
 
 [ $verbose -eq 1 ] && echo range: first=$frst last=$last
 
 function run() {
 	[ $verbose -eq 1 ] && echo "sudo $@"
-	if [ $stats -eq 1 ]; then
+	if [ $stat -eq 1 ]; then
 		start_time=$(date +%s.%N)
 		sudo "$@"
 		stop_time=$(date +%s.%N)
@@ -175,6 +198,7 @@ function dumpmode_1() {
 	(( last - frst > 0xff )) && echo "err: invalid range" && eval "$er_exit"
 	sudo i2cset -y -f $bus $addr $frst c
 	run i2cdump -f -y -r $frst-$last $bus $addr c
+	xfersize=1
 }
 
 function dumpmode_2() {
@@ -197,12 +221,12 @@ function dumpblock() {
 	[ $verbose -eq 1 ] && echo dump: ${dumpmode_desc[$((dumpmode - 1))]}
 
 	case "$dumpmode" in
-		1|2 ) dumpmode_$dumpmode ;;
+		1|2 ) dumpmode_$dumpmode || eval "$er_exit" ;;
 		* ) echo "err: invalid dump mode: $dumpmode"; eval "$er_exit" ;;
 	esac
 
 	total_data=$(( last - frst + 1 ))
-	[ $stats -eq 1 ] && dump_stats
+	[ $stat -eq 1 ] && dump_stat
 }
 
 function fillcore() {
@@ -219,7 +243,7 @@ function fillcore() {
 		fi
 		if [ "$v_calc" = true ]; then
 			v=$(( v + stepsd ))
-			v=$( printf "0x%x" $(( v & 0xff)) )
+			v=$( printf "0x%x" $(( v & 0xff )) )
 		fi
 	done
 }
@@ -249,6 +273,7 @@ function fillmode_3() {
 			run i2cset -y -f $bus $addr $hb $lb $lb i
 		fi
 	done
+	xfersize=1
 }
 
 function fillmode_4() {
@@ -266,12 +291,12 @@ function fillblock() {
 	[ $verbose -eq 1 ] && echo fillblock: ${fillmode_desc[$((fillmode - 1))]}
 
 	case "$fillmode" in
-		1|2|3|4 ) fillmode_$fillmode ;;
+		1|2|3|4 ) fillmode_$fillmode || eval "$er_exit" ;;
 		* ) echo "err: invalid fill mode: $fillmode"; eval "$er_exit" ;;
 	esac
 
 	total_data=$(( last - frst + 1 ))
-	[ $stats -eq 1 ] && fill_stats
+	[ $stat -eq 1 ] && fill_stat
 }
 
 [[ $fillmode > 0 ]] && fillblock
