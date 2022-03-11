@@ -69,7 +69,7 @@ function usage() {
 help
 	for ((i = 1; i <= ${#dumpmode_desc[@]}; i++))
 		do echo -e "\t\t\t\t\t$i - ${dumpmode_desc[$((i - 1))]}"; done
-	printf '\n%s\n' "                 -f, --fillmode MODE    Write data mode:"
+	printf '\n%s\n' "		 -f, --fillmode MODE    Write data mode:"
 	for ((i = 1; i <= ${#fillmode_desc[@]}; i++))
 		do echo -e "\t\t\t\t\t$i - ${fillmode_desc[$((i - 1))]}"; done
 	cat << help
@@ -178,7 +178,7 @@ function run() {
 	[ $verbose -eq 1 ] && echo "sudo $@"
 	if [ $stat -eq 1 ]; then
 		start_time=$(date +%s.%N)
-		sudo "$@"
+		sudo "$@" || return
 		stop_time=$(date +%s.%N)
 		diff_time=$(echo "$stop_time - $start_time" | bc)
 		diff_time=${diff_time%???}
@@ -196,9 +196,9 @@ function setoffset() {
 
 function dumpmode_1() {
 	(( last - frst > 0xff )) && echo "err: invalid range" && eval "$er_exit"
+	xfersize=1
 	sudo i2cset -y -f $bus $addr $frst c
 	run i2cdump -f -y -r $frst-$last $bus $addr c
-	xfersize=1
 }
 
 function dumpmode_2() {
@@ -236,10 +236,12 @@ function fillcore() {
 		setoffset xx hb lb $i
 		if [[ $offsize == "1" ]]; then
 			run i2ctransfer -f -y $bus \
-			    w$(( step + $offsize ))@$addr $lb $v$suffix
+			    w$(( step + $offsize ))@$addr $lb $v$suffix \
+			    || return
 		else
 			run i2ctransfer -f -y $bus \
-			    w$(( step + $offsize ))@$addr $hb $lb $v$suffix
+			    w$(( step + $offsize ))@$addr $hb $lb $v$suffix \
+			    || return
 		fi
 		if [ "$v_calc" = true ]; then
 			v=$(( v + stepsd ))
