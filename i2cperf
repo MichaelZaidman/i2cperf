@@ -2,7 +2,7 @@
 #
 # Copyright (C) 2022 Michael Zaidman <michael.zaidman@gmail.com>
 #
-# The i2cblock is a Linux utility to test the large IO chunks' capabilities
+# The i2cperf is a Linux utility to test the large IO chunks' capabilities
 # and benchmark performance of the I2C controllers and Linux kernel I2C bus
 # drivers.
 #

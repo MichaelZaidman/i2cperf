@@ -7,14 +7,14 @@ drivers.
 
 The i2cperf was originally written to save me the hassle of utilizing the
 Linux i2c tools like i2ctransfer, i2cdump, i2cset, and i2cget to debug and test
-the hid-ft260.ko Linux kernel driver for the FTDI FT260 chip, which implements
-the USB HID to I2C bus bridge. And specifically, to issue the data transfers
-exceeding a single USB HID report size or maximum size of the EEPROM Page Write
-operation. The maximum transfer size in the Page Write mode differs between
-EEPROM chips. For example, it's 8 bytes for the 24C02 and 128 bytes for the
-24C512. The size of the internal address, also known as offset, is different
-for small and large EEPROMs. It can be either one or two bytes depending on
-the EEPROM size.
+the hid-ft260 [[1]](#References) Linux kernel driver for the FTDI FT260
+chip [[2]](#References), which implements the USB HID to I2C bus bridge. And
+specifically, to issue the data transfers exceeding a single USB HID report
+size or maximum size of the EEPROM Page Write operation. The maximum transfer
+size in the Page Write mode differs between EEPROM chips. For example, it's 8
+bytes for the 24C02 but 128 bytes for the 24C512. The size of the internal
+address, also known as offset, is different for small and large EEPROMs. It
+can be either one or two bytes depending on the EEPROM size.
 
 The eeprog utility of the i2c-toots package provides a very limited EEPROM
 read-write functionality not sufficient to exercise any I2C bus controller or
@@ -59,9 +59,25 @@ calculating the baud and payload data rates at different workloads.
                                 2 - Two bytes offest, for larger than 256B EEPROMs
 ```
 
-Tested with Ubuntu 16.04 (PC i7-4790K) and Ubuntu 20.04.3 (VirtualBox) with:
-- 24c02, 24c32, 24c512 with UMFT260EV1A EVB [1] and hid-ft260 kernel driver [2]
-- 24c32, 24c512  with CH341A black board [3] and 2c-ch341-usb kernel driver [4]
+## Prerequisites
+The **i2cperf** relies on i2ctransfer, added to the [i2c-tools](https://git.kernel.org/pub/scm/utils/i2c-tools/i2c-tools.git)
+since v4.0 (2017-10-30).
+
+The i2c-tool usually comes with every Linux distribution and likely will
+already be of the needed version.
+
+We can check it by running the `i2ctransfer` command. If it does not exist,
+then the i2c-tools is not installed, or it is of outdated version.
+
+## Tested on
+1. Ubuntu 16.04 (Linux 4.15.0-142), MS-7916 PC (i7-4790K, 16G RAM)
+2. Ubuntu 20.04 (Linux 5.13.0-30), VirtualBox VM on Win10 HP EliteBook 840 G6 (i5-8265U, 16G RAM)
+
+## Tested with
+1. EEPROMS: 24c02, 24c32, 24c512
+2. UMFT260EV1A EVB [[3]](#References) and hid-ft260 kernel driver [[1]](#References)
+3. CH341A black board [[4]](#References) and 2c-ch341-usb kernel driver [[5]](#References)
+
 
 # Examples
 
@@ -130,7 +146,7 @@ Performance stats:
 ```
 
 ## Read 256B block via i2ctransfer by 32 bytes chunks
-Setup: 24c512 EEPROM, UMFT260EV1A EVB, hid-ft260 driver, PC (i7-4790K CPU)
+Setup: 24c512 EEPROM, UMFT260EV1A EVB, hid-ft260 driver, PC (i7-4790K)
 ```
 swuser@comex-usb01:~/sw/i2cperf$ ./i2cperf -d 2 -o 2 -s 32 -r 0-0xff 13 0x51 -S
 0x0000: 0x00 0x01 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0a 0x0b 0x0c 0x0d 0x0e 0x0f 0x10 0x11 0x12 0x13 0x14 0x15 0x16 0x17 0x18 0x19 0x1a 0x1b 0x1c 0x1d 0x1e 0x1f
@@ -154,11 +170,13 @@ https://github.com/MichaelZaidman/i2cperf.git
 
 
 # References
-[1] https://www.ftdichip.com/Support/Documents/DataSheets/Modules/DS_UMFT260EV1A.pdf
+[1] https://github.com/MichaelZaidman/hid-ft260
 
-[2] https://github.com/MichaelZaidman/hid-ft260
+[2] https://ftdichip.com/wp-content/uploads/2020/08/DS_FT260.pdf
 
-[3] https://www.onetransistor.eu/2017/08/ch341a-mini-programmer-schematic.html
+[3] https://www.ftdichip.com/Support/Documents/DataSheets/Modules/DS_UMFT260EV1A.pdf
 
-[4] https://github.com/allanbian1017/i2c-ch341-usb
+[4] https://www.onetransistor.eu/2017/08/ch341a-mini-programmer-schematic.html
+
+[5] https://github.com/allanbian1017/i2c-ch341-usb
 
