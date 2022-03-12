@@ -1,11 +1,11 @@
 
 # Overview
 
-The **i2cblock** is a Linux utility to test the large IO chunks' capabilities
+The **i2cperf** is a Linux utility to test the large IO chunks' capabilities
 and benchmark performance of the I2C controllers and Linux kernel I2C bus
 drivers.
 
-The i2cblock was originally written to save me the hassle of utilizing the
+The i2cperf was originally written to save me the hassle of utilizing the
 Linux i2c tools like i2ctransfer, i2cdump, i2cset, and i2cget to debug and test
 the hid-ft260.ko Linux kernel driver for the FTDI FT260 chip, which implements
 the USB HID to I2C bus bridge. And specifically, to issue the data transfers
@@ -29,10 +29,10 @@ the I2C bus driver evaluation and benchmarking.
 This bash script leverages the standard Linux I2C tools simplifying their
 configuration to issue predefined I2C IO patterns allowing performance
 benchmarking of the I2C controller and Linux kernel I2C bus driver by
-calculating the transmitted data rate at different workloads.
+calculating the baud and payload data rates at different workloads.
 
 ```
- Usage: i2cblock [-h] [-v] -S] [-f MODE] [-d MODE] [-o SIZE] [-s SIZE] [-r FIRST-LAST] BUS ADDRESS
+ Usage: i2cperf [-h] [-v] -S] [-f MODE] [-d MODE] [-o SIZE] [-s SIZE] [-r FIRST-LAST] BUS ADDRESS
 
          BUS                    I2C bus master device number
          ADDRESS                EEPROM device address (0x50 - 0x57)
@@ -59,16 +59,16 @@ calculating the transmitted data rate at different workloads.
                                 2 - Two bytes offest, for larger than 256B EEPROMs
 ```
 
-Tested with Ubuntu 16.04 on PC and Ubuntu 20.04.3 in VirtualBox with:
+Tested with Ubuntu 16.04 (PC i7-4790K) and Ubuntu 20.04.3 (VirtualBox) with:
 - 24c02, 24c32, 24c512 with UMFT260EV1A EVB [1] and hid-ft260 kernel driver [2]
 - 24c32, 24c512  with CH341A black board [3] and 2c-ch341-usb kernel driver [4]
 
 # Examples
 
 ## Fill 1KB block with zeros via i2ctransfer by 32 bytes chunks
-Setup: 24c512 EEPROM, UMFT260EV1A EVB, hid-ft260 driver, PC (i7-4790K CPU)
+Setup: 24c512 EEPROM, UMFT260EV1A EVB, hid-ft260 driver, PC (i7-4790K)
 ```
-$ ./i2cblock -f 1 -o 2 -s 32 -r 0-0x3ff 13 0x51 -S
+$ ./i2cperf -f 1 -o 2 -s 32 -r 0-0x3ff 13 0x51 -S
 
 Performance stats:
   Fill block with zeros via i2ctransfer
@@ -78,9 +78,9 @@ Performance stats:
 ```
 
 ## Write 1KB data block with pseudo random via i2ctransfer by 16 bytes chunks
-Setup: 24c512 EEPROM, CH341A black board, i2c-ch341-usb driver, PC (i7-4790K CPU)
+Setup: 24c512 EEPROM, CH341A black board, i2c-ch341-usb driver, PC (i7-4790K)
 ```
-$ ./i2cblock -f 4 -o 2 -s 16 -r 0-0x3ff 13 0x50 -S
+$ ./i2cperf -f 4 -o 2 -s 16 -r 0-0x3ff 13 0x50 -S
 
 Performance stats:
   Fill block with pseudo random via i2ctransfer by chunks
@@ -90,9 +90,9 @@ Performance stats:
 ```
 
 ## Write 1KB data block with increment via i2cset byte by byte
-Setup: 24c512 EEPROM, CH341A black board, i2c-ch341-usb driver, PC (i7-4790K CPU)
+Setup: 24c512 EEPROM, CH341A black board, i2c-ch341-usb driver, PC (i7-4790K)
 ```
-$ ./i2cblock -f 3 -o 2 -r 0-0xff 13 0x50 -S
+$ ./i2cperf -f 3 -o 2 -r 0-0xff 13 0x50 -S
 
 Performance stats:
   Fill block with increment via i2cset byte by byte
@@ -102,9 +102,9 @@ Performance stats:
 ```
 
 ## Read 256B block via i2ctransfer by chunks of 16 bytes size
-Setup: 24c512 EEPROM, CH341A black board, i2c-ch341-usb driver, PC (i7-4790K CPU)
+Setup: 24c512 EEPROM, CH341A black board, i2c-ch341-usb driver, PC (i7-4790K)
 ```
-$ ./i2cblock -d 2 -o 2 -s 16 -r 0-0xff 13 0x50 -S
+$ ./i2cperf -d 2 -o 2 -s 16 -r 0-0xff 13 0x50 -S
 0x0000: 0x00 0x01 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0a 0x0b 0x0c 0x0d 0x0e 0x0f
 0x0010: 0x10 0x11 0x12 0x13 0x14 0x15 0x16 0x17 0x18 0x19 0x1a 0x1b 0x1c 0x1d 0x1e 0x1f
 0x0020: 0x20 0x21 0x22 0x23 0x24 0x25 0x26 0x27 0x28 0x29 0x2a 0x2b 0x2c 0x2d 0x2e 0x2f
@@ -132,7 +132,7 @@ Performance stats:
 ## Read 256B block via i2ctransfer by 32 bytes chunks
 Setup: 24c512 EEPROM, UMFT260EV1A EVB, hid-ft260 driver, PC (i7-4790K CPU)
 ```
-swuser@comex-usb01:~/sw/i2cblock$ ./i2cblock -d 2 -o 2 -s 32 -r 0-0xff 13 0x51 -S
+swuser@comex-usb01:~/sw/i2cperf$ ./i2cperf -d 2 -o 2 -s 32 -r 0-0xff 13 0x51 -S
 0x0000: 0x00 0x01 0x02 0x03 0x04 0x05 0x06 0x07 0x08 0x09 0x0a 0x0b 0x0c 0x0d 0x0e 0x0f 0x10 0x11 0x12 0x13 0x14 0x15 0x16 0x17 0x18 0x19 0x1a 0x1b 0x1c 0x1d 0x1e 0x1f
 0x0020: 0x20 0x21 0x22 0x23 0x24 0x25 0x26 0x27 0x28 0x29 0x2a 0x2b 0x2c 0x2d 0x2e 0x2f 0x30 0x31 0x32 0x33 0x34 0x35 0x36 0x37 0x38 0x39 0x3a 0x3b 0x3c 0x3d 0x3e 0x3f
 0x0040: 0x40 0x41 0x42 0x43 0x44 0x45 0x46 0x47 0x48 0x49 0x4a 0x4b 0x4c 0x4d 0x4e 0x4f 0x50 0x51 0x52 0x53 0x54 0x55 0x56 0x57 0x58 0x59 0x5a 0x5b 0x5c 0x5d 0x5e 0x5f
@@ -150,7 +150,7 @@ Performance stats:
 ```
 
 # Source
-https://github.com/MichaelZaidman/i2cblock.git
+https://github.com/MichaelZaidman/i2cperf.git
 
 
 # References
