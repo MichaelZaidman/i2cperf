@@ -1,3 +1,4 @@
+#!/bin/bash
 # SPDX-License-Identifier: MIT
 #
 # Copyright (C) 2022 Michael Zaidman <michael.zaidman@gmail.com>
@@ -10,11 +11,10 @@
 #          confuse your I2C bus, cause data loss, or have more serious side
 #          effects. Be extremely careful using this tool.
 #
-#!/bin/bash
 
 (return 0 2>/dev/null) && sourced=1 || sourced=0
 
-if [ $sourced == 1 ]; then
+if [ $sourced -eq 1 ]; then
 	er_exit="return"
 	ok_exit="return"
 else
@@ -35,6 +35,7 @@ frst=0x80
 last=0xef
 stat=0
 width=80
+nice=-20
 
 fillmode_desc=(
 	"Fill block with zeros via i2ctransfer"
@@ -125,30 +126,35 @@ if [ $# -ne 2 ]; then
 	usage
 	eval "$er_exit"
 fi
+
 bus=$1
 addr=$2
 
+[ $verbose -eq 1 ] && echo range: first=$frst last=$last
+
+function calc() {
+	[ -z "$2" ] && scale=6 || scale=$2
+	echo "scale=$scale; $1" | bc
+}
+
 function core_stat() {
-	xfers=$(echo "$total_data / $xfersize" | bc)
-	data_time=$(echo "scale=6; $total_time / ($total_data * 8)" | bc)
+	xfers=$(( ($total_data + $xfersize - 1) / $xfersize ))
+	data_time=$(calc "$total_time / ($total_data * 8)")
 
-	[[ $fillmode > 0 ]] && addr_byte=1 || addr_byte=2
+	[[ $fillmode > 0 ]] && ctrl_byte=1 || ctrl_byte=2
 
-	# prot_bits = xfers * start, stop, and repeated start (for read) bits
-	prot_bits=$((xfers * (addr_byte + 1)))
+	# protocol bits per IO transfer include: ctrl byte, start, stop, and
+	# repeated start bit in the read case
+	prot_bits=$(( xfers * (ctrl_byte + 1) ))
 
-	# data_bits = data bytes * 8 bits + 1 ack bit
-	data_bits=$(echo "scale=0; $total_data * 9" | bc)
+	# data bits: 8 bits of data and ACK bit
+	data_bits=$(( total_data * 9 ))
+	addr_bits=$(( xfers * (offsize + ctrl_byte) * 9 ))
+	baud_time=$(calc "$total_time / ($data_bits + $addr_bits + $prot_bits)" 8)
 
-	# addr_bits = xfers * (offsize + addr bytes) * (8 bits + 1 ack bit)
-	addr_bits=$(echo "scale=0; $xfers * ($offsize + $addr_byte) * 9" | bc)
-
-	baud_time=$(echo "scale=8; $total_time / \
-		   ($data_bits + $addr_bits + $prot_bits)" | bc)
-
-	data_rate=$(echo "scale=0; 1 / $data_time" | bc)
-	baud_rate=$(echo "scale=0; 1 / $baud_time" | bc)
-	efficiency=$(echo "scale=0; $data_rate * 100 / $baud_rate" | bc)
+	data_rate=$(calc "1 / $data_time" 0)
+	baud_rate=$(calc "1 / $baud_time" 0)
+	efficiency=$(calc "$data_rate * 100 / $baud_rate" 0)
 
 	echo -e "\nPerformance stats:"
 	echo -e "  $1"
@@ -172,20 +178,40 @@ function fill_stat() {
 	core_stat "${fillmode_desc[$(( fillmode - 1 ))]}"
 }
 
-[ $verbose -eq 1 ] && echo range: first=$frst last=$last
+function run_with_stat() {
+	t0=$(date +%s.%N)
+	t1=$(date +%s.%N)
+	t2=$(date +%s.%N)
+	t3=$(date +%s.%N)
+	t4=$(date +%s.%N)
+	t5=$(date +%s.%N)
+	t6=$(date +%s.%N)
+	t7=$(date +%s.%N)
+	t8=$(date +%s.%N)
+	t9=$(date +%s.%N)
+	start_time=$(date +%s.%N)
+	"$@" || return
+	stop_time=$(date +%s.%N)
+	timer_overhead=$(calc "($start_time - $t1) / 9")
+	#echo timer_overhead $timer_overhead
+	diff_time=$(calc "$stop_time - $start_time - $timer_overhead")
+	diff_time=${diff_time%???}
+	#echo diff_time $diff_time
+	total_time=$(calc "$total_time + $diff_time")
+	#echo total_time $total_time
+}
 
 function run() {
-	[ $verbose -eq 1 ] && echo "sudo $@"
+	[ $verbose -eq 1 ] && echo "$@"
 	if [ $stat -eq 1 ]; then
-		start_time=$(date +%s.%N)
-		sudo "$@" || return
-		stop_time=$(date +%s.%N)
-		diff_time=$(echo "$stop_time - $start_time" | bc)
-		diff_time=${diff_time%???}
-		total_time=$(echo "$total_time + $diff_time" | bc)
+		run_with_stat "$@"
 	else
-		sudo "$@"
+		"$@"
 	fi
+}
+
+function init_step() {
+	(( last - frst < xfersize )) && step=$(( last - frst )) || step=$xfersize
 }
 
 function setoffset() {
@@ -197,18 +223,18 @@ function setoffset() {
 function dumpmode_1() {
 	(( last - frst > 0xff )) && echo "err: invalid range" && eval "$er_exit"
 	xfersize=1
-	sudo i2cset -y -f $bus $addr $frst c
+	i2cset -y -f $bus $addr $frst c
 	run i2cdump -f -y -r $frst-$last $bus $addr c
 }
 
 function dumpmode_2() {
-	step=$xfersize
+	init_step
 	for (( i=$frst; i<$last; i=i+$step ))
 	do
 		(( last - i < step )) && step=$(( last - i + 1 ))
 		setoffset xx hb lb $i
 		echo -ne "$xx: "
-		if [[ $offsize == "1" ]]; then
+		if [[ $offsize -eq "1" ]]; then
 			run i2ctransfer -y -f $bus w$offsize@$addr $lb r$step
 		else
 			run i2ctransfer -y -f $bus w$offsize@$addr $hb $lb r$step
@@ -217,7 +243,11 @@ function dumpmode_2() {
 }
 
 function dumpblock() {
+	(
+	renice $nice $BASHPID > /dev/null
 	total_time=0
+	total_data=$(( last - frst + 1 ))
+
 	[ $verbose -eq 1 ] && echo dump: ${dumpmode_desc[$((dumpmode - 1))]}
 
 	case "$dumpmode" in
@@ -225,8 +255,8 @@ function dumpblock() {
 		* ) echo "err: invalid dump mode: $dumpmode"; eval "$er_exit" ;;
 	esac
 
-	total_data=$(( last - frst + 1 ))
 	[ $stat -eq 1 ] && dump_stat
+	)
 }
 
 function fillcore() {
@@ -234,7 +264,7 @@ function fillcore() {
 	do
 		(( last - i < step )) && step=$(( last - i + 1 ))
 		setoffset xx hb lb $i
-		if [[ $offsize == "1" ]]; then
+		if [[ $offsize -eq "1" ]]; then
 			run i2ctransfer -f -y $bus \
 			    w$(( step + $offsize ))@$addr $lb $v$suffix \
 			    || return
@@ -287,8 +317,11 @@ function fillmode_4() {
 }
 
 function fillblock() {
-	step=$xfersize
+	(
+	renice $nice $BASHPID > /dev/null
+	init_step
 	total_time=0
+	total_data=$(( last - frst + 1 ))
 
 	[ $verbose -eq 1 ] && echo fillblock: ${fillmode_desc[$((fillmode - 1))]}
 
@@ -297,8 +330,8 @@ function fillblock() {
 		* ) echo "err: invalid fill mode: $fillmode"; eval "$er_exit" ;;
 	esac
 
-	total_data=$(( last - frst + 1 ))
 	[ $stat -eq 1 ] && fill_stat
+	)
 }
 
 [[ $fillmode > 0 ]] && fillblock
