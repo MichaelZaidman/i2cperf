@@ -139,7 +139,7 @@ function calc() {
 
 function core_stat() {
 	xfers=$(( ($total_data + $xfersize - 1) / $xfersize ))
-	data_time=$(calc "$total_time / ($total_data * 8)")
+	data_time=$(calc "$total_time / ($total_data * 8)" 9)
 
 	[[ $fillmode > 0 ]] && ctrl_byte=1 || ctrl_byte=2
 
@@ -150,23 +150,24 @@ function core_stat() {
 	# data bits: 8 bits of data and ACK bit
 	data_bits=$(( total_data * 9 ))
 	addr_bits=$(( xfers * (offsize + ctrl_byte) * 9 ))
-	baud_time=$(calc "$total_time / ($data_bits + $addr_bits + $prot_bits)" 8)
+	baud_time=$(calc "$total_time / ($data_bits + $addr_bits + $prot_bits)" 9)
 
 	data_rate=$(calc "1 / $data_time" 0)
 	baud_rate=$(calc "1 / $baud_time" 0)
 	efficiency=$(calc "$data_rate * 100 / $baud_rate" 0)
 
-	echo -e "\nPerformance stats:"
-	echo -e "  $1"
-	header="  %-10s %13s %14s %12s %9s %12s\n  "
-	format="  %-10d %-14d %-14d %-12d %-11d %-12d\n\n"
+	echo -e "\n  $1"
+	separator=$(printf '%.0s-' {1..67})
+	echo "  $separator"
+	header="  %14s %14s %13s %10s %12s\n  "
+	format="  %-15d %-14d %-13d %-11d %-12d\n\n"
 
-	printf "$header" "baudrate" "datarate(bps)" "efficiency(%)" \
-		"datasize(B)" "totalIOs" "IOsize(B)"
+	printf "$header" "data rate(bps)" "efficiency(%)" \
+		"data size(B)" "total IOs" "IO size(B)"
 
-	printf '%.0s-' {1..75}; echo
+	echo $separator
 
-	printf "$format" $baud_rate $data_rate $efficiency \
+	printf "$format" $data_rate $efficiency \
 		$total_data $xfers $xfersize
 }
 
