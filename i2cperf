@@ -140,7 +140,6 @@ function calc() {
 function core_stat() {
 	xfers=$(( ($total_data + $xfersize - 1) / $xfersize ))
 	data_time=$(calc "$total_time / ($total_data * 8)" 9)
-
 	[[ $fillmode > 0 ]] && ctrl_byte=1 || ctrl_byte=2
 
 	# protocol bits per IO transfer include: ctrl byte, start, stop, and
@@ -193,13 +192,9 @@ function run_with_stat() {
 	start_time=$(date +%s.%N)
 	"$@" || return
 	stop_time=$(date +%s.%N)
-	timer_overhead=$(calc "($start_time - $t1) / 9")
-	#echo timer_overhead $timer_overhead
+	timer_overhead=$(calc "($start_time - $t1) / 20")
 	diff_time=$(calc "$stop_time - $start_time - $timer_overhead")
-	diff_time=${diff_time%???}
-	#echo diff_time $diff_time
 	total_time=$(calc "$total_time + $diff_time")
-	#echo total_time $total_time
 }
 
 function run() {
