@@ -330,5 +330,6 @@ function fillblock() {
 	)
 }
 
-[[ $fillmode > 0 ]] && fillblock
-[[ $dumpmode > 0 ]] && dumpblock
+[[ $fillmode -gt 0 ]] && { fillblock || eval "$er_exit"; }
+[[ $dumpmode -gt 0 ]] && { dumpblock || eval "$er_exit"; }
+eval "$ok_exit"
